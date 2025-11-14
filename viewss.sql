@@ -1,45 +1,73 @@
--- 3.1. Vista 'pedidos_publico' (Oculta datos sensibles/internos como las cédulas)
-CREATE OR REPLACE VIEW pedidos_publico AS
-SELECT
-    p.id_pedido,
-    c.nombres AS nombre_cliente,
-    c.apellidos AS apellido_cliente,
-    p.descripcion,
-    p.estado,
-    p.fecha_creacion,
-    a.nombres AS nombre_asesor
-FROM
-    pedido p
-JOIN
-    cliente c ON p.id_cliente = c.id_cliente
-JOIN
-    asesor a ON p.id_asesor = a.id_asesor;
+DROP VIEW IF EXISTS ventas_publico;
+DROP VIEW IF EXISTS resumen_ventas_por_producto;
+DROP VIEW IF EXISTS ventas_con_tarjeta;
 
--- 3.2. Vista 'resumen_cotizaciones_por_asesor' (Estadísticas agregadas)
-CREATE OR REPLACE VIEW resumen_cotizaciones_por_asesor AS
+-- Vista "ventas_publico"
+-- Equivalente a pedidos_publico: muestra info de ventas sin exponer todo el detalle interno
+CREATE OR REPLACE VIEW ventas_publico AS
 SELECT
-    a.nombres,
-    a.apellidos,
-    COUNT(c.id_cotizacion) AS total_cotizaciones,
-    SUM(CASE WHEN c.estado = 'Aprobada' THEN 1 ELSE 0 END) AS cotizaciones_aprobadas,
-    -- Usamos FORMAT(AVG(), 0) para redondear el monto promedio a un entero legible
-    FORMAT(AVG(c.monto), 0) AS monto_promedio_cotizacion 
+    v.id              AS id_venta,
+    p.nombre          AS nombre_producto,
+    p.categoria       AS categoria_producto,
+    v.fecha_venta,
+    v.cantidad,
+    v.total,
+    v.metodo_pago
 FROM
-    asesor a
-LEFT JOIN
-    pedido p ON a.id_asesor = p.id_asesor
-LEFT JOIN
-    cotizacion c ON p.id_pedido = c.id_pedido
+    ventas v
+    INNER JOIN productos p ON v.id_producto = p.id;
+
+
+
+-- Vista "resumen_ventas_por_producto"
+-- Equivalente a resumen_cotizaciones_por_asesor: stats agregadas por producto
+CREATE OR REPLACE VIEW resumen_ventas_por_producto AS
+SELECT
+    p.id                     AS id_producto,
+    p.nombre                 AS nombre_producto,
+    p.categoria,
+    COUNT(v.id)              AS total_ventas,
+    IFNULL(SUM(v.cantidad), 0) AS unidades_vendidas,
+    IFNULL(SUM(v.total), 0)    AS total_ingresos,
+    FORMAT(AVG(v.total), 2)    AS ticket_promedio
+FROM
+    productos p
+    LEFT JOIN ventas v ON p.id = v.id_producto
 GROUP BY
-    a.id_asesor, a.nombres, a.apellidos;
+    p.id, p.nombre, p.categoria;
 
--- 3.3. Vista 'pedidos_pendientes_aprobacion' (con CHECK OPTION para validar inserciones/actualizaciones)
--- Solo se pueden ver/modificar pedidos en estado 'Creado' o 'Cotizado'
-CREATE OR REPLACE VIEW pedidos_pendientes_aprobacion AS
+
+
+-- Vista "ventas_con_tarjeta" con CHECK OPTION
+-- Equivalente a pedidos_pendientes_aprobacion: restringe a filas que cumplen el WHERE
+CREATE OR REPLACE VIEW ventas_con_tarjeta AS
 SELECT
-    id_pedido, id_cliente, id_asesor, descripcion, estado
+    id,
+    id_producto,
+    fecha_venta,
+    cantidad,
+    total,
+    metodo_pago
 FROM
-    pedido
+    ventas
 WHERE
-    estado IN ('Creado', 'Cotizado')
+    metodo_pago = 'tarjeta'
 WITH CHECK OPTION;
+
+-- PROBAR LAS VIEWS
+
+SELECT * FROM ventas_publico LIMIT 5;
+
+SELECT * FROM resumen_ventas_por_producto LIMIT 5;
+
+SELECT * FROM ventas_con_tarjeta LIMIT 5;
+
+-- Probar check option
+
+-- Esto debería funcionar (sigue siendo 'tarjeta')
+INSERT INTO ventas_con_tarjeta (id_producto, fecha_venta, cantidad, total, metodo_pago)
+VALUES (1, NOW(), 1, 123456.78, 'tarjeta');
+
+-- Esto debería FALLAR (rompe el WHERE de la vista)
+INSERT INTO ventas_con_tarjeta (id_producto, fecha_venta, cantidad, total, metodo_pago)
+VALUES (1, NOW(), 1, 9999.99, 'efectivo');

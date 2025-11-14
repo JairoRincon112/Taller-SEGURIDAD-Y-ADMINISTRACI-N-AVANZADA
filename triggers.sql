@@ -1,87 +1,113 @@
-USE jewelry_workshop;
-
--- 1. Crear la tabla de auditoría si no existe (asumo que ya la creaste en un paso anterior)
-CREATE TABLE IF NOT EXISTS pedidos_audit_log (
-    log_id INT AUTO_INCREMENT PRIMARY KEY,
-    id_pedido_afectado INT,
-    operacion VARCHAR(10) NOT NULL,
+-- 1. Tabla de auditoría para ventas
+CREATE TABLE IF NOT EXISTS ventas_audit_log (
+    id_log INT AUTO_INCREMENT PRIMARY KEY,
+    id_venta_afectada INT NOT NULL,
+    operacion ENUM('INSERT','UPDATE','DELETE') NOT NULL,
     usuario_bd VARCHAR(100) NOT NULL,
     fecha_operacion TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    cambios_anteriores JSON
+    cambios JSON
 );
 
--- 2. Cambiar el delimitador (CRÍTICO para Triggers y Stored Procedures)
+-- 2. Cambiamos delimitador para poder crear los triggers
 DELIMITER //
 
--- 3. Crear el Trigger AFTER INSERT
-CREATE TRIGGER trg_pedido_after_insert
-AFTER INSERT ON pedido
+-- (Opcional) por si ya existen triggers viejos, los borramos
+DROP TRIGGER IF EXISTS trg_ventas_after_insert;
+//
+DROP TRIGGER IF EXISTS trg_ventas_after_update;
+//
+DROP TRIGGER IF EXISTS trg_ventas_after_delete;
+//
+
+-- 3. Trigger AFTER INSERT en ventas
+CREATE TRIGGER trg_ventas_after_insert
+AFTER INSERT ON ventas
 FOR EACH ROW
 BEGIN
-    INSERT INTO pedidos_audit_log (id_pedido_afectado, operacion, usuario_bd, cambios_anteriores)
+    INSERT INTO ventas_audit_log (id_venta_afectada, operacion, usuario_bd, cambios)
     VALUES (
-        NEW.id_pedido,
+        NEW.id,
         'INSERT',
         USER(),
-        JSON_OBJECT('descripcion', NEW.descripcion, 'estado', NEW.estado)
+        JSON_OBJECT(
+            'id_producto', NEW.id_producto,
+            'fecha_venta', NEW.fecha_venta,
+            'cantidad', NEW.cantidad,
+            'total', NEW.total,
+            'metodo_pago', NEW.metodo_pago
+        )
     );
 END;
 //
 
--- 4. Crear el Trigger AFTER UPDATE
-CREATE TRIGGER trg_pedido_after_update
-AFTER UPDATE ON pedido
+-- 4. Trigger AFTER UPDATE en ventas
+CREATE TRIGGER trg_ventas_after_update
+AFTER UPDATE ON ventas
 FOR EACH ROW
 BEGIN
-    INSERT INTO pedidos_audit_log (id_pedido_afectado, operacion, usuario_bd, cambios_anteriores)
+    INSERT INTO ventas_audit_log (id_venta_afectada, operacion, usuario_bd, cambios)
     VALUES (
-        NEW.id_pedido,
+        NEW.id,
         'UPDATE',
         USER(),
         JSON_OBJECT(
-            'old_estado', OLD.estado,
-            'new_estado', NEW.estado,
-            'old_descripcion', OLD.descripcion,
-            'new_descripcion', NEW.descripcion
+            'old_id_producto', OLD.id_producto,
+            'new_id_producto', NEW.id_producto,
+            'old_fecha_venta', OLD.fecha_venta,
+            'new_fecha_venta', NEW.fecha_venta,
+            'old_cantidad', OLD.cantidad,
+            'new_cantidad', NEW.cantidad,
+            'old_total', OLD.total,
+            'new_total', NEW.total,
+            'old_metodo_pago', OLD.metodo_pago,
+            'new_metodo_pago', NEW.metodo_pago
         )
     );
 END;
 //
 
--- 5. Crear el Trigger AFTER DELETE
-CREATE TRIGGER trg_pedido_after_delete
-AFTER DELETE ON pedido
+-- 5. Trigger AFTER DELETE en ventas
+CREATE TRIGGER trg_ventas_after_delete
+AFTER DELETE ON ventas
 FOR EACH ROW
 BEGIN
-    INSERT INTO pedidos_audit_log (id_pedido_afectado, operacion, usuario_bd, cambios_anteriores)
+    INSERT INTO ventas_audit_log (id_venta_afectada, operacion, usuario_bd, cambios)
     VALUES (
-        OLD.id_pedido,
+        OLD.id,
         'DELETE',
         USER(),
         JSON_OBJECT(
-            'deleted_descripcion', OLD.descripcion,
-            'deleted_estado', OLD.estado,
-            'deleted_cliente_id', OLD.id_cliente
+            'id_producto', OLD.id_producto,
+            'fecha_venta', OLD.fecha_venta,
+            'cantidad', OLD.cantidad,
+            'total', OLD.total,
+            'metodo_pago', OLD.metodo_pago
         )
     );
 END;
 //
 
--- 6. Restaurar el delimitador por defecto (;)
-DELIMITER;
+-- 6. Restauramos el delimitador normal
+DELIMITER ;
 
 
+-- Prueba de los triggers
+-- 1. Crear una venta de prueba
+INSERT INTO ventas (id_producto, fecha_venta, cantidad, total, metodo_pago)
+VALUES (1, NOW(), 2, 123456.78, 'tarjeta');
 
--- Pruebas. Ejecutarlas una por una
+SET @last_id := LAST_INSERT_ID();
 
--- 4.5. Realizar operaciones de prueba y verificar en pedidos_audit_log:
+-- 2. Actualizar la venta
+UPDATE ventas
+SET cantidad = 3,
+    total = 200000.00
+WHERE id = @last_id;
 
-INSERT INTO pedido (id_cliente, id_asesor, descripcion, estado) VALUES (1, 1, 'Anillo de prueba audit', 'Creado');
---
-SET @last_id = LAST_INSERT_ID();
---
-UPDATE pedido SET estado = 'Fabricacion' WHERE id_pedido = @last_id;
---
-DELETE FROM pedido WHERE id_pedido = @last_id;
---
-SELECT * FROM pedidos_audit_log WHERE id_pedido_afectado = @last_id;
+-- 3. Eliminar la venta
+DELETE FROM ventas
+WHERE id = @last_id;
+
+-- 4. Ver la auditoría
+SELECT * FROM ventas_audit_log
+WHERE id_venta_afectada = @last_id;
